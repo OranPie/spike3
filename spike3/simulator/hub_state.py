@@ -51,6 +51,18 @@ class HubState:
         # Hub button (center button)
         self.button_pressed = False
 
+        # Left/right hub buttons
+        self.button_left: bool = False
+        self.button_right: bool = False
+        self.button_left_was_pressed: bool = False
+        self.button_right_was_pressed: bool = False
+
+        # IMU gesture
+        self.gesture: int = 0  # 0=none 1=shake 2=freefall 3=tapped 4=double_tapped
+
+        # Hub temperature (°C)
+        self.hub_temperature: int = 28
+
         # Hub-internal devices
         self.imu = IMU()
         self.matrix = Matrix5x5()
@@ -168,6 +180,28 @@ class HubState:
     def stop_program(self):
         with self._lock:
             self.running_program = None
+
+    # ── Button / gesture simulation helpers ───────────────────────
+
+    def press_button(self, button: str):
+        """Simulate a button press. button = 'left' or 'right'."""
+        if button == "left":
+            self.button_left = True
+            self.button_left_was_pressed = True
+        elif button == "right":
+            self.button_right = True
+            self.button_right_was_pressed = True
+
+    def release_button(self, button: str):
+        """Simulate a button release."""
+        if button == "left":
+            self.button_left = False
+        elif button == "right":
+            self.button_right = False
+
+    def trigger_gesture(self, gesture: int):
+        """Simulate an IMU gesture (1=shake 2=freefall 3=tapped 4=double_tapped)."""
+        self.gesture = gesture
 
     # ── Display helpers ────────────────────────────────────────────
 

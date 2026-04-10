@@ -210,8 +210,93 @@ def main():
     time.sleep(0.5)
     test("Distance sensor attached", hub_state.ports[3] is not None)
 
-    # 11. Cleanup
-    print("\n[11] Cleanup...")
+    # 11. eval_python sensor queries via simulator
+    print("\n[11] Testing eval_python sensor API (simulator)...")
+    try:
+        # Color sensor on port C
+        color_val = hub.color(2, timeout=2.0)  # Port C
+        test("color() returns int", isinstance(color_val, int), f"got {color_val}")
+        test("color() RED value", color_val == Color.RED, f"got {color_val}")
+
+        refl = hub.reflection(2, timeout=2.0)
+        test("reflection() returns int", isinstance(refl, int), f"got {refl}")
+
+        # Distance sensor on port D
+        dist = hub.distance(3, timeout=2.0)
+        test("distance() returns mm", isinstance(dist, int), f"got {dist}")
+        test("distance() 150mm value", dist == 150, f"got {dist}")
+
+        # Motor position/speed on port A
+        pos = hub.motor_position(0, timeout=2.0)
+        test("motor_position() returns int", isinstance(pos, int), f"got {pos}")
+
+        spd = hub.motor_speed(0, timeout=2.0)
+        test("motor_speed() returns int", isinstance(spd, int), f"got {spd}")
+
+        # Stall / interrupt queries
+        stalled = hub.motor_is_stalled(0, timeout=2.0)
+        test("motor_is_stalled() = False", stalled is False)
+
+        interrupted = hub.motor_was_interrupted(0, timeout=2.0)
+        test("motor_was_interrupted() = False", interrupted is False)
+    except Exception as e:
+        test("eval_python sensor API", False, str(e))
+
+    # 12. Button and gesture API
+    print("\n[12] Testing button and gesture API (simulator)...")
+    try:
+        lp = hub.left_button_pressed(timeout=2.0)
+        test("left_button_pressed() = False", lp is False)
+
+        rp = hub.right_button_pressed(timeout=2.0)
+        test("right_button_pressed() = False", rp is False)
+
+        # Simulate button press on simulator side
+        hub_state.press_button("left")
+        time.sleep(0.1)
+        lp = hub.left_button_pressed(timeout=2.0)
+        test("left_button_pressed() = True after press", lp is True)
+
+        was_p = hub.left_button_was_pressed(timeout=2.0)
+        test("left_button_was_pressed() = True (clears flag)", was_p is True)
+
+        # Second call should be False (flag cleared)
+        was_p2 = hub.left_button_was_pressed(timeout=2.0)
+        test("left_button_was_pressed() = False on 2nd call", was_p2 is False)
+
+        hub_state.release_button("left")
+
+        # Temperature
+        temp = hub.temperature(timeout=2.0)
+        test("temperature() returns int", isinstance(temp, int))
+        test("temperature() ~28°C", 20 <= temp <= 40, f"got {temp}")
+
+        # Gesture
+        g = hub.get_gesture(timeout=2.0)
+        test("get_gesture() = 0 (none)", g == 0)
+
+        hub_state.trigger_gesture(1)  # shake
+        g2 = hub.get_gesture(timeout=2.0)
+        test("get_gesture() = 1 (shake)", g2 == 1)
+    except Exception as e:
+        test("Button/gesture API", False, str(e))
+
+    # 13. New tunnel command builders
+    print("\n[13] Testing new tunnel commands...")
+    try:
+        hub.display_number(7)
+        time.sleep(0.2)
+        test("display_number() sent without error", True)
+
+        hub.sound_play_note(69, 500, 80)  # A4 for 500ms
+        time.sleep(0.2)
+        test("sound_play_note() sent without error", True)
+    except Exception as e:
+        test("New tunnel commands", False, str(e))
+
+    # 14. Cleanup
+    print("\n[14] Cleanup...")
+
     try:
         hub.set_notification_interval(0)
         time.sleep(0.1)

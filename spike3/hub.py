@@ -17,9 +17,13 @@ from typing import Any, Callable, Optional
 from . import atlantis, cobs, micropython, tunnel
 from .enums import (
     MsgId, Status, ProgramAction, NotifSubId, Port,
+    DeviceType, Gesture,
     LEGO_VENDOR_ID, ProductId, HubType, ConnectionType,
     DEFAULT_TIMEOUT, SETUP_TIMEOUT, RESPONSE_TO_REQUEST,
 )
+
+# Port index → MicroPython port name (used in eval_python calls)
+_PORT_NAMES = {0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F"}
 from .transport import Transport, UsbTransport, BleTransport, TcpTransport
 
 logger = logging.getLogger("spike3")
@@ -79,6 +83,7 @@ class Hub:
 
         # Latest sensor snapshot (updated on every DeviceNotification)
         self._latest_notifs: dict[tuple, Any] = {}  # keyed by (sub_id,) or (sub_id, port)
+        self._device_notif: Any = None    # last raw DeviceNotification
 
         # Start background receive
         self._transport.set_on_data(self._on_raw_data)
@@ -212,6 +217,7 @@ class Hub:
         # Unsolicited messages
         if msg_id == MsgId.DEVICE_NOTIFICATION:
             # Cache latest sensor values for polling API
+            self._device_notif = msg
             for sub in msg.notifications:
                 key = (sub.sub_id, getattr(sub, 'port', None))
                 self._latest_notifs[key] = sub
@@ -514,13 +520,17 @@ class Hub:
             while time.time() < deadline:
                 remaining = max(0.1, deadline - time.time())
                 try:
-                    line = self._console_queue.get(timeout=min(remaining, 0.3))
-                    stripped = line.strip()
-                    # Skip echo of our own command and bare prompts
-                    if stripped in (">>>", "...", code_stripped):
-                        continue
-                    if stripped:
-                        result_lines.append(stripped)
+                    block = self._console_queue.get(timeout=min(remaining, 0.3))
+                    # Split multi-line blocks (simulator sends echo+value+prompt together)
+                    for line in block.split("\n"):
+                        stripped = line.strip().rstrip("\r")
+                        # Skip echo of our own command and bare prompts
+                        if stripped in (">>>", "...", code_stripped):
+                            continue
+                        if stripped:
+                            result_lines.append(stripped)
+                            break
+                    if result_lines:
                         break
                 except queue.Empty:
                     if result_lines:
@@ -577,6 +587,259 @@ class Hub:
             if sid == NotifSubId.MOTOR:
                 result[port] = notif
         return result
+
+    def get_port_info(self) -> dict:
+        """Return dict of port index → device_id for all ports with known devices.
+
+        Uses the most recently received DeviceNotification data.
+        Example: {0: 49, 2: 61} means port A has large motor, port C has color sensor.
+        See DeviceType enum for ID meanings.
+        """
+        result = {}
+        for (sid, port), notif in self._latest_notifs.items():
+            if port is not None and hasattr(notif, "device_id"):
+                result[port] = notif.device_id
+        return result
+
+    # ── eval_python sensor API ─────────────────────────────────────
+
+    def color(self, port: int, timeout: float = 1.0) -> int:
+        """Read color from color sensor on *port*.
+
+        Returns a Color enum value (-1=NONE .. 10=WHITE).
+        Requires a color sensor attached at that port.
+        """
+        raw = self.eval_python(
+            f"color_sensor.color(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return -1
+
+    def reflection(self, port: int, timeout: float = 1.0) -> int:
+        """Read surface reflection from color sensor on *port* (0–100)."""
+        raw = self.eval_python(
+            f"color_sensor.reflection(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return 0
+
+    def ambient(self, port: int, timeout: float = 1.0) -> int:
+        """Read ambient light from color sensor on *port* (0–100)."""
+        raw = self.eval_python(
+            f"color_sensor.ambient(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return 0
+
+    def raw_rgb(self, port: int, timeout: float = 2.0) -> tuple:
+        """Read raw (red, green, blue) from color sensor on *port* (each 0–1024)."""
+        r = self.eval_python(f"color_sensor.get_red(port.{_PORT_NAMES[port]})", timeout)
+        g = self.eval_python(f"color_sensor.get_green(port.{_PORT_NAMES[port]})", timeout)
+        b = self.eval_python(f"color_sensor.get_blue(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(r), int(g), int(b)
+        except (ValueError, TypeError):
+            return 0, 0, 0
+
+    def force(self, port: int, timeout: float = 1.0) -> float:
+        """Read force from force sensor on *port* (0–10 N)."""
+        raw = self.eval_python(
+            f"force_sensor.force(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def is_pressed(self, port: int, timeout: float = 1.0) -> bool:
+        """Return True if the force sensor on *port* is currently pressed."""
+        raw = self.eval_python(
+            f"force_sensor.pressed(port.{_PORT_NAMES[port]})", timeout)
+        return raw in ("True", "1", "true")
+
+    def distance(self, port: int, timeout: float = 1.0) -> int:
+        """Read distance from ultrasonic sensor on *port* (mm). -1 = no object."""
+        raw = self.eval_python(
+            f"distance_sensor.distance(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return -1
+
+    def motor_position(self, port: int, timeout: float = 1.0) -> int:
+        """Read cumulative motor encoder position on *port* (degrees)."""
+        raw = self.eval_python(
+            f"motor.get_position(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return 0
+
+    def motor_speed(self, port: int, timeout: float = 1.0) -> int:
+        """Read motor speed on *port* (deg/s)."""
+        raw = self.eval_python(
+            f"motor.get_speed(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return 0
+
+    def motor_was_interrupted(self, port: int, timeout: float = 1.0) -> bool:
+        """Return True if the last motor movement on *port* was interrupted."""
+        raw = self.eval_python(
+            f"motor.was_interrupted(port.{_PORT_NAMES[port]})", timeout)
+        return raw in ("True", "1", "true")
+
+    def motor_is_stalled(self, port: int, timeout: float = 1.0) -> bool:
+        """Return True if the motor on *port* is currently stalled."""
+        raw = self.eval_python(
+            f"motor.is_stalled(port.{_PORT_NAMES[port]})", timeout)
+        return raw in ("True", "1", "true")
+
+    def left_button_pressed(self, timeout: float = 1.0) -> bool:
+        """Return True if the left hub button is currently held down."""
+        raw = self.eval_python("hub.left_button.is_pressed()", timeout)
+        return raw in ("True", "1", "true")
+
+    def right_button_pressed(self, timeout: float = 1.0) -> bool:
+        """Return True if the right hub button is currently held down."""
+        raw = self.eval_python("hub.right_button.is_pressed()", timeout)
+        return raw in ("True", "1", "true")
+
+    def left_button_was_pressed(self, timeout: float = 1.0) -> bool:
+        """Return True if the left button was pressed since last call (clears flag)."""
+        raw = self.eval_python("hub.left_button.was_pressed()", timeout)
+        return raw in ("True", "1", "true")
+
+    def right_button_was_pressed(self, timeout: float = 1.0) -> bool:
+        """Return True if the right button was pressed since last call (clears flag)."""
+        raw = self.eval_python("hub.right_button.was_pressed()", timeout)
+        return raw in ("True", "1", "true")
+
+    def get_gesture(self, timeout: float = 1.0) -> int:
+        """Return the last detected IMU gesture ID (see Gesture enum).
+
+        0=none, 1=shake, 2=freefall, 3=tapped, 4=double_tapped.
+        """
+        raw = self.eval_python("hub.motion_sensor.get_gesture()", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return 0
+
+    def was_gesture(self, gesture: int, timeout: float = 1.0) -> bool:
+        """Return True if the given gesture occurred since last call (clears flag)."""
+        raw = self.eval_python(
+            f"hub.motion_sensor.was_gesture({int(gesture)})", timeout)
+        return raw in ("True", "1", "true")
+
+    def temperature(self, timeout: float = 1.0) -> int:
+        """Read the hub's internal temperature sensor (°C)."""
+        raw = self.eval_python("hub.temperature()", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return 0
+
+    def charger_connected(self, timeout: float = 1.0) -> bool:
+        """Return True if the hub is connected to a USB charger."""
+        raw = self.eval_python("hub.battery.charger_connected()", timeout)
+        return raw in ("True", "1", "true")
+
+    def wait_for_button(self, button: str = "left",
+                        timeout: float = 10.0) -> bool:
+        """Block until a hub button is pressed or the timeout elapses.
+
+        Args:
+            button: ``"left"`` or ``"right"``.
+            timeout: Maximum wait in seconds (0 = wait forever).
+
+        Returns:
+            ``True`` if the button was pressed; ``False`` if timed out.
+        """
+        method = ("hub.left_button.is_pressed()" if button == "left"
+                  else "hub.right_button.is_pressed()")
+        deadline = time.monotonic() + timeout if timeout > 0 else float("inf")
+        while time.monotonic() < deadline:
+            try:
+                raw = self.eval_python(method, timeout=0.5)
+                if raw in ("True", "1", "true"):
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.05)
+        return False
+
+    # ── Program slot shortcuts ─────────────────────────────────────
+
+    def run_slot(self, slot: int = 0, timeout: float = DEFAULT_TIMEOUT):
+        """Start a program stored in *slot* (0–19).
+
+        Alias for :meth:`start_program`.
+        """
+        return self.start_program(slot, timeout)
+
+    def stop_slot(self, slot: int = 0, timeout: float = DEFAULT_TIMEOUT):
+        """Stop the program running in *slot* (0–19).
+
+        Alias for :meth:`stop_program`.
+        """
+        return self.stop_program(slot, timeout)
+
+    def run_python_program(self, code: str, slot: int = 0, run: bool = True,
+                           on_progress=None,
+                           timeout: float = DEFAULT_TIMEOUT):
+        """Upload a MicroPython source string and optionally run it.
+
+        Args:
+            code: MicroPython source code.
+            slot: Program slot to upload to (0–19).
+            run: If ``True``, start the program immediately after upload.
+            on_progress: Optional ``callback(bytes_sent, total_bytes)``.
+            timeout: Per-chunk transfer timeout.
+        """
+        filename = f"scratch_{slot}"
+        data = code.encode("utf-8")
+        self.upload_program(filename, data, slot=slot,
+                            on_progress=on_progress, timeout=timeout)
+        if run:
+            self.run_slot(slot, timeout=timeout)
+
+    def list_slots(self, timeout: float = DEFAULT_TIMEOUT) -> list:
+        """List filenames in the hub's program slot directory.
+
+        Returns a list of strings (filenames).
+        """
+        return self.list_files("", slot=0, timeout=timeout)
+
+    # ── Extended display/sound convenience ────────────────────────
+
+    def display_number(self, n: int):
+        """Display a number on the 5×5 matrix (uses MicroPython show)."""
+        self.send_tunnel(tunnel.display_number(int(n)))
+
+    def sound_play_note(self, midi_note: int, duration_ms: int,
+                        volume: int = 100):
+        """Play a MIDI note number *midi_note* for *duration_ms* ms.
+
+        Args:
+            midi_note: MIDI note (60 = middle C, 69 = A4 = 440 Hz).
+            duration_ms: Duration in milliseconds.
+            volume: Volume 0–100.
+        """
+        self.send_tunnel(tunnel.sound_play_note(midi_note, duration_ms, volume))
+
+    def motor_run_until_stalled(self, port: int, speed: int, stop: int = 1):
+        """Run motor until stalled (use carefully — may apply large torque).
+
+        Args:
+            port: Port index (0=A … 5=F).
+            speed: Speed percentage (−100 to 100).
+            stop: Stop mode after stall: 0=coast, 1=brake, 2=hold.
+        """
+        self.send_tunnel(tunnel.motor_run_until_stalled(port, speed, stop))
 
     # ── Convenience motor/LED/sound via tunnel ─────────────────────
 

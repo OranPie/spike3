@@ -161,6 +161,30 @@ class Color(IntEnum):
     WHITE = 10
 
 
+class DeviceType(IntEnum):
+    """LPF2 device type IDs (appear in MotorNotification.device_id)."""
+    MOTOR_MEDIUM = 48       # SPIKE Prime Medium Motor (0x30)
+    MOTOR_LARGE = 49        # SPIKE Prime Large Motor  (0x31)
+    ACCELERATION = 57
+    GYRO = 58
+    ORIENTATION_SENSOR = 59
+    COLOR_SENSOR = 61       # SPIKE Prime Color Sensor
+    DISTANCE_SENSOR = 62    # SPIKE Prime Ultrasonic Sensor
+    FORCE_SENSOR = 63       # SPIKE Prime Force Sensor
+    MOTOR_SMALL = 65        # SPIKE Essential Small Motor
+    MOTOR_MEDIUM_GREY = 75  # Stone-grey Medium Motor
+    MOTOR_LARGE_GREY = 76   # Stone-grey Large Motor
+
+
+class Gesture(IntEnum):
+    """IMU gesture IDs returned by hub.motion_sensor.get_gesture()."""
+    NONE = 0
+    SHAKE = 1
+    FREEFALL = 2
+    TAPPED = 3
+    DOUBLE_TAPPED = 4
+
+
 # ── MicroPython JSON-RPC notification IDs ───────────────────────────
 
 class MPNotification(IntEnum):

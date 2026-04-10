@@ -283,6 +283,119 @@ class ConsoleHandler:
         if m:
             return "0"
 
+        # ── color_sensor.color(port.X) ─────────────────────────────
+        m = re.match(r"color_sensor\.color\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            dev = self.hub.get_device(port_idx)
+            from .devices import ColorSensor
+            if isinstance(dev, ColorSensor):
+                return str(int(dev.color))  # int() converts Color enum → int
+            return "-1"
+
+        # ── color_sensor.reflection(port.X) ────────────────────────
+        m = re.match(r"color_sensor\.reflection\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            dev = self.hub.get_device(port_idx)
+            from .devices import ColorSensor
+            if isinstance(dev, ColorSensor):
+                return str(int(dev.reflection))
+            return "0"
+
+        # ── color_sensor.ambient(port.X) ───────────────────────────
+        m = re.match(r"color_sensor\.ambient\(([^)]+)\)", code)
+        if m:
+            return "0"
+
+        # ── color_sensor.get_red/green/blue(port.X) ────────────────
+        m = re.match(r"color_sensor\.get_(red|green|blue)\(([^)]+)\)", code)
+        if m:
+            channel = m.group(1)
+            port_idx = _port(m.group(2))
+            dev = self.hub.get_device(port_idx)
+            from .devices import ColorSensor
+            if isinstance(dev, ColorSensor):
+                return str(getattr(dev, f"raw_{channel}", 0))
+            return "0"
+
+        # ── force_sensor.force(port.X) ─────────────────────────────
+        m = re.match(r"force_sensor\.force\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            dev = self.hub.get_device(port_idx)
+            from .devices import ForceSensor
+            if isinstance(dev, ForceSensor):
+                return str(dev.force)
+            return "0"
+
+        # ── force_sensor.pressed(port.X) ───────────────────────────
+        m = re.match(r"force_sensor\.pressed\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            dev = self.hub.get_device(port_idx)
+            from .devices import ForceSensor
+            if isinstance(dev, ForceSensor):
+                return "True" if dev.touch else "False"
+            return "False"
+
+        # ── force_sensor.raw_force(port.X) ─────────────────────────
+        m = re.match(r"force_sensor\.raw_force\(([^)]+)\)", code)
+        if m:
+            return "0"
+
+        # ── distance_sensor.distance(port.X) ───────────────────────
+        m = re.match(r"distance_sensor\.distance\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            dev = self.hub.get_device(port_idx)
+            from .devices import DistanceSensor
+            if isinstance(dev, DistanceSensor):
+                return str(dev.distance)
+            return "-1"
+
+        # ── motor.was_interrupted(port.X) ──────────────────────────
+        m = re.match(r"motor\.was_interrupted\(([^)]+)\)", code)
+        if m:
+            return "False"
+
+        # ── motor.is_stalled(port.X) ───────────────────────────────
+        m = re.match(r"motor\.is_stalled\(([^)]+)\)", code)
+        if m:
+            return "False"
+
+        # ── hub.left_button / hub.right_button ─────────────────────
+        if code == "hub.left_button.is_pressed()":
+            return "True" if self.hub.button_left else "False"
+        if code == "hub.left_button.was_pressed()":
+            v = self.hub.button_left_was_pressed
+            self.hub.button_left_was_pressed = False
+            return "True" if v else "False"
+        if code == "hub.right_button.is_pressed()":
+            return "True" if self.hub.button_right else "False"
+        if code == "hub.right_button.was_pressed()":
+            v = self.hub.button_right_was_pressed
+            self.hub.button_right_was_pressed = False
+            return "True" if v else "False"
+
+        # ── hub.motion_sensor.get_gesture() / was_gesture(n) ───────
+        if code == "hub.motion_sensor.get_gesture()":
+            return str(self.hub.gesture)
+        m = re.match(r"hub\.motion_sensor\.was_gesture\((\d+)\)", code)
+        if m:
+            n = int(m.group(1))
+            return "True" if self.hub.gesture == n else "False"
+
+        # ── hub.temperature() ──────────────────────────────────────
+        if code == "hub.temperature()":
+            return str(self.hub.hub_temperature)
+
+        # ── hub.display.show(n) — numeric ──────────────────────────
+        m = re.match(r"hub\.display\.show\((-?\d+)\)", code)
+        if m:
+            logger.debug(f"display.show number={m.group(1)}")
+            return None
+
         # ── print(...) — ignore ────────────────────────────────────
         if code.startswith("print("):
             return None

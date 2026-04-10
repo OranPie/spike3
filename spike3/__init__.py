@@ -21,7 +21,7 @@ from .hub import Hub
 from .enums import (
     LEGO_VENDOR_ID, ProductId, ConnectionType, HubType,
     ProductGroupDevice, MsgId, Status, ProgramAction,
-    NotifSubId, Port, Orientation, Color,
+    NotifSubId, Port, Orientation, Color, DeviceType, Gesture,
     MPNotification,
     ATLANTIS_SERVICE_UUID, ATLANTIS_TX_CHAR_UUID, ATLANTIS_RX_CHAR_UUID,
     LWP3_SERVICE_UUID, LWP3_CHAR_UUID,
@@ -61,7 +61,8 @@ __all__ = [
     # Enums
     "LEGO_VENDOR_ID", "ProductId", "ConnectionType", "HubType",
     "ProductGroupDevice", "MsgId", "Status", "ProgramAction",
-    "NotifSubId", "Port", "Orientation", "Color", "MPNotification",
+    "NotifSubId", "Port", "Orientation", "Color", "DeviceType", "Gesture",
+    "MPNotification",
     # UUIDs
     "ATLANTIS_SERVICE_UUID", "ATLANTIS_TX_CHAR_UUID", "ATLANTIS_RX_CHAR_UUID",
     "LWP3_SERVICE_UUID", "LWP3_CHAR_UUID",

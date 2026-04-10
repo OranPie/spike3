@@ -491,3 +491,34 @@ def is_error(msg: dict) -> bool:
 
 def is_notification(msg: dict) -> bool:
     return "i" not in msg and "m" in msg and "p" in msg
+
+# ── Extended command builders ──────────────────────────────────────────────
+
+def display_number(n: int) -> str:
+    """Display a number on the 5×5 matrix."""
+    return f"hub.display.show({int(n)})"
+
+
+def sound_play_note(midi_note: int, duration_ms: int, volume: int = 100) -> str:
+    """Play a MIDI note number for duration_ms milliseconds."""
+    freq = _midi_to_hz(midi_note)
+    return f"hub.sound.beep({freq:.1f}, {int(duration_ms)}, {int(volume)})"
+
+
+def motor_run_until_stalled(port: int, speed: int, stop: int = 1) -> str:
+    """Run motor until stalled via a very large degree target."""
+    vel = _speed_to_vel(speed)
+    stop_names = {0: "motor.COAST", 1: "motor.BRAKE", 2: "motor.HOLD"}
+    stop_const = stop_names.get(stop, "motor.BRAKE")
+    direction = 1 if vel >= 0 else -1
+    return (f"motor.run_for_degrees(port.{_port_name(port)}, "
+            f"{direction * 36000}, {abs(vel)}, stop={stop_const})")
+
+
+def display_animate(images: list, delay_ms: int = 200) -> str:
+    """Animate a list of 25-char image strings on the 5×5 matrix."""
+    parts = []
+    for img in images:
+        parts.append(f"hub.display.show({_image_25_to_micropython(img)})")
+        parts.append(f"import time;time.sleep_ms({int(delay_ms)})")
+    return ";".join(parts)

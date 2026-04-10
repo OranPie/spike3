@@ -251,6 +251,11 @@ class ForceSensor(DeviceBase):
             self.force = max(0, min(100, force))
             self.touch = 1 if self.force > 0 else 0
 
+    @property
+    def pressed(self) -> bool:
+        """True if the sensor is being pressed."""
+        return self.touch > 0
+
     def to_notification_bytes(self) -> bytes:
         with self._lock:
             return struct.pack("<BBBB", self.SUB_ID, self.port,
