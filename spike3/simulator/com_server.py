@@ -35,6 +35,7 @@ from ..enums import MsgId
 from .hub_state import HubState
 from .responder import ProtocolResponder
 from .tunnel_handler import TunnelHandler
+from .console_handler import ConsoleHandler
 
 logger = logging.getLogger("spike3.simulator.com")
 
@@ -65,6 +66,7 @@ class ComServer:
         self._ticker_thread: Optional[threading.Thread] = None
         self._responder: Optional[ProtocolResponder] = None
         self._tunnel_handler: Optional[TunnelHandler] = None
+        self._console_handler: Optional[ConsoleHandler] = None
         self._frame_acc = cobs.FrameAccumulator()
         self._write_lock = threading.Lock()
 
@@ -99,6 +101,7 @@ class ComServer:
         self._create_pty()
         self._responder = ProtocolResponder(self.hub, self._write_to_master)
         self._tunnel_handler = TunnelHandler(self.hub, self._responder)
+        self._console_handler = ConsoleHandler(self.hub, self._responder)
 
         self._running = True
 
@@ -259,6 +262,7 @@ class TcpComBridge:
         self._running = False
         self._responder: Optional[ProtocolResponder] = None
         self._tunnel_handler: Optional[TunnelHandler] = None
+        self._console_handler: Optional[ConsoleHandler] = None
         self._server_socket = None
         self._client_socket = None
         self._frame_acc = cobs.FrameAccumulator()
@@ -280,6 +284,7 @@ class TcpComBridge:
 
         self._responder = ProtocolResponder(self.hub, self._write_to_client)
         self._tunnel_handler = TunnelHandler(self.hub, self._responder)
+        self._console_handler = ConsoleHandler(self.hub, self._responder)
 
         accept_thread = threading.Thread(
             target=self._accept_loop, daemon=True, name="sim-tcp-accept")

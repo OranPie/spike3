@@ -30,9 +30,10 @@ from .storage import SlotStorage
 from .com_server import ComServer, TcpComBridge
 from .responder import ProtocolResponder
 from .tunnel_handler import TunnelHandler
+from .console_handler import ConsoleHandler
 
 __all__ = [
     "HubState", "Motor", "ColorSensor", "DistanceSensor", "ForceSensor",
     "IMU", "Matrix5x5", "DeviceBase", "SlotStorage",
-    "ComServer", "TcpComBridge", "ProtocolResponder", "TunnelHandler",
+    "ComServer", "TcpComBridge", "ProtocolResponder", "TunnelHandler", "ConsoleHandler",
 ]

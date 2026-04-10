@@ -109,6 +109,10 @@ class ConsoleNotification:
     msg_id: int = MsgId.CONSOLE_NOTIFICATION
     text: str = ""
 
+    def to_bytes(self) -> bytes:
+        # null-terminated UTF-8 string, max 255 chars
+        return _u8(self.msg_id) + self.text.encode("utf-8")[:255] + b"\x00"
+
 
 @dataclass
 class SetHubNameRequest:

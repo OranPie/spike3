@@ -43,6 +43,7 @@ from .. import cobs
 from .hub_state import HubState
 from .responder import ProtocolResponder
 from .tunnel_handler import TunnelHandler
+from .console_handler import ConsoleHandler
 
 logger = logging.getLogger("spike3.simulator.ble")
 
@@ -66,6 +67,7 @@ class BleServer:
         self._server = None  # bless.BlessServer
         self._responder: Optional[ProtocolResponder] = None
         self._tunnel_handler: Optional[TunnelHandler] = None
+        self._console_handler: Optional[ConsoleHandler] = None
         self._frame_acc = cobs.FrameAccumulator()
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -86,6 +88,7 @@ class BleServer:
         self._loop = asyncio.get_event_loop()
         self._responder = ProtocolResponder(self.hub, self._send_ble_data)
         self._tunnel_handler = TunnelHandler(self.hub, self._responder)
+        self._console_handler = ConsoleHandler(self.hub, self._responder)
 
         # Create GATT server
         self._server = BlessServer(

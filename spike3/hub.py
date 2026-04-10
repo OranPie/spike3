@@ -8,6 +8,7 @@ JSON-RPC (legacy firmware) protocols.
 from __future__ import annotations
 
 import logging
+import queue
 import struct
 import threading
 import time
@@ -72,6 +73,10 @@ class Hub:
         self.on_program_flow: Optional[Callable[[Any], None]] = None
         self.on_tunnel: Optional[Callable[[bytes], None]] = None
 
+        # Console output queue (fed by incoming ConsoleNotification messages)
+        self._console_queue: queue.Queue = queue.Queue()
+        self._eval_lock = threading.Lock()  # serializes eval_python calls
+
         # Latest sensor snapshot (updated on every DeviceNotification)
         self._latest_notifs: dict[tuple, Any] = {}  # keyed by (sub_id,) or (sub_id, port)
 
@@ -82,32 +87,50 @@ class Hub:
 
     @classmethod
     def connect_usb(cls, port: str, baudrate: int = 115200,
-                    protocol: str = "atlantis") -> "Hub":
+                    protocol: str = "atlantis",
+                    auto_notifications: bool = True,
+                    notification_interval_ms: int = 100) -> "Hub":
         """Connect to a SPIKE hub via USB serial.
 
         Args:
             port: Serial port name (e.g. 'COM3', '/dev/ttyACM0').
             baudrate: Baud rate (default 115200).
             protocol: 'atlantis' or 'micropython'.
+            auto_notifications: Automatically enable sensor notifications.
+            notification_interval_ms: Notification interval in ms (default 100).
         """
         transport = UsbTransport(port, baudrate)
         transport.open()
         hub = cls(transport, protocol)
         logger.info(f"Connected to hub via USB: {port}")
+        if auto_notifications and protocol == "atlantis":
+            try:
+                hub.set_notification_interval(notification_interval_ms)
+            except Exception as e:
+                logger.debug(f"Auto-notification setup failed (ignored): {e}")
         return hub
 
     @classmethod
-    def connect_ble(cls, address: str, protocol: str = "atlantis") -> "Hub":
+    def connect_ble(cls, address: str, protocol: str = "atlantis",
+                    auto_notifications: bool = True,
+                    notification_interval_ms: int = 100) -> "Hub":
         """Connect to a SPIKE hub via BLE.
 
         Args:
             address: BLE device address or UUID.
             protocol: 'atlantis' (default for BLE).
+            auto_notifications: Automatically enable sensor notifications.
+            notification_interval_ms: Notification interval in ms (default 100).
         """
         transport = BleTransport(address)
         transport.open()
         hub = cls(transport, protocol)
         logger.info(f"Connected to hub via BLE: {address}")
+        if auto_notifications and protocol == "atlantis":
+            try:
+                hub.set_notification_interval(notification_interval_ms)
+            except Exception as e:
+                logger.debug(f"Auto-notification setup failed (ignored): {e}")
         return hub
 
     @classmethod
@@ -195,6 +218,9 @@ class Hub:
             if self.on_notification:
                 self.on_notification(msg)
         elif msg_id == MsgId.CONSOLE_NOTIFICATION:
+            # Feed the console queue for eval_python()
+            if msg.text:
+                self._console_queue.put(msg.text)
             if self.on_console:
                 self.on_console(msg.text)
         elif msg_id == MsgId.PROGRAM_FLOW_NOTIFICATION:
@@ -251,8 +277,12 @@ class Hub:
         """Send an Atlantis message without waiting for response."""
         raw = atlantis.encode_message(msg)
         framed = cobs.encode(raw)
-        with self._lock:
-            self._transport.write(framed)
+        try:
+            with self._lock:
+                self._transport.write(framed)
+        except Exception as e:
+            logger.warning(f"Write failed for msg_id={msg.msg_id}: {e}")
+            raise
 
     # ── MicroPython low-level send/receive ──────────────────────────
 
@@ -428,9 +458,74 @@ class Hub:
             timeout=timeout,
         )
 
-    def send_tunnel(self, data: bytes):
-        """Send a tunnel message (bidirectional, no response expected)."""
-        self._send_atlantis_no_response(atlantis.TunnelMessage(data=data))
+    def send_tunnel(self, code: str):
+        """Send Python REPL code to hub via ConsoleNotification (fire and forget).
+
+        The hub executes the code in its MicroPython REPL. No response is
+        expected. This replaces the old TunnelMessage approach which did not
+        work on Atlantis firmware.
+
+        Args:
+            code: Python code string to execute (e.g. "motor.run(port.A, 750)").
+        """
+        self.exec_python(code)
+
+    def exec_python(self, code: str) -> None:
+        """Send Python code to hub REPL for execution (fire and forget).
+
+        Sends a ConsoleNotification (Atlantis msg_id=33) containing the code.
+        The hub executes it in MicroPython REPL. Output arrives via
+        on_console callback and the console queue.
+
+        Args:
+            code: Python code. A trailing ``\\r`` is appended automatically.
+        """
+        line = code.rstrip("\r\n") + "\r"
+        msg = atlantis.ConsoleNotification(text=line)
+        self._send_atlantis_no_response(msg)
+
+    def eval_python(self, code: str, timeout: float = 3.0) -> str:
+        """Send Python code and return the first line of console output.
+
+        Uses the MicroPython REPL via ConsoleNotification. Best used when
+        no program is running on the hub.
+
+        Args:
+            code: Python expression to evaluate (e.g. "hub.battery.voltage()").
+            timeout: Seconds to wait for response.
+
+        Returns:
+            First non-empty, non-echo console output line from the hub,
+            or empty string on timeout.
+        """
+        with self._eval_lock:
+            # Drain any stale console output
+            while True:
+                try:
+                    self._console_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+            code_stripped = code.strip()
+            self.exec_python(code)
+
+            deadline = time.time() + timeout
+            result_lines = []
+            while time.time() < deadline:
+                remaining = max(0.1, deadline - time.time())
+                try:
+                    line = self._console_queue.get(timeout=min(remaining, 0.3))
+                    stripped = line.strip()
+                    # Skip echo of our own command and bare prompts
+                    if stripped in (">>>", "...", code_stripped):
+                        continue
+                    if stripped:
+                        result_lines.append(stripped)
+                        break
+                except queue.Empty:
+                    if result_lines:
+                        break
+            return "\n".join(result_lines)
 
     # ── Sensor polling API ─────────────────────────────────────────
 

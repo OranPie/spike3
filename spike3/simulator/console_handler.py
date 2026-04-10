@@ -1,0 +1,291 @@
+"""ConsoleNotification (Python REPL) handler for the SPIKE 3 simulator.
+
+Receives Python REPL code strings from hub.py (via ConsoleNotification msg_id=33)
+and dispatches them to the appropriate simulated devices, updating HubState.
+
+The SPIKE 3 Atlantis hub accepts MicroPython via ConsoleNotification and echoes
+output back as ConsoleNotification responses. We simulate that here.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Optional
+
+from .hub_state import HubState
+from .responder import ProtocolResponder
+
+logger = logging.getLogger("spike3.simulator.console")
+
+# Port letter → index (A=0 … F=5)
+_PORT_LETTERS = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4, "F": 5}
+
+# Stop-mode constant names
+_STOP_MODES = {"motor.COAST": 0, "motor.BRAKE": 1, "motor.HOLD": 2, "motor.SMART_COAST": 0}
+
+
+def _port(name: str) -> int:
+    """'port.A' → 0, etc."""
+    m = re.match(r"port\.([A-F])", name.strip())
+    if m:
+        return _PORT_LETTERS[m.group(1)]
+    return 0
+
+
+def _stop(name: str) -> int:
+    """'motor.COAST' → 0, etc., or raw int string."""
+    name = name.strip()
+    if name in _STOP_MODES:
+        return _STOP_MODES[name]
+    try:
+        return int(name)
+    except ValueError:
+        return 0
+
+
+def _num(s: str) -> float:
+    try:
+        return float(s.strip())
+    except ValueError:
+        return 0.0
+
+
+def _extract_args(body: str) -> list[str]:
+    """Split 'a, b, c=d' into ['a', 'b', 'c=d'] accounting for nested brackets."""
+    depth = 0
+    parts: list[str] = []
+    cur: list[str] = []
+    for ch in body:
+        if ch in "([{":
+            depth += 1
+            cur.append(ch)
+        elif ch in ")]}":
+            depth -= 1
+            cur.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        parts.append("".join(cur).strip())
+    return [p for p in parts if p]
+
+
+class ConsoleHandler:
+    """Handles ConsoleNotification messages: parses Python REPL code → hub state."""
+
+    def __init__(self, hub: HubState, responder: ProtocolResponder):
+        self.hub = hub
+        self.responder = responder
+        responder.on_console = self.on_console_data
+
+    def on_console_data(self, code: str):
+        """Called when a ConsoleNotification (Python REPL code) arrives from the host."""
+        code = code.rstrip("\r\n\x00")
+        if not code:
+            return
+        logger.debug(f"Console REPL: {code!r}")
+
+        output = self._dispatch(code)
+        # Echo the code line back (REPL behaviour) + any output
+        response = code + "\r\n"
+        if output is not None:
+            response += str(output) + "\r\n"
+        response += ">>> "
+        self.responder.send_console_text(response)
+
+    # ── Dispatcher ─────────────────────────────────────────────────
+
+    def _dispatch(self, code: str) -> Optional[str]:
+        """Return value string to echo, or None."""
+        # Handle multiple semicolon-separated statements
+        if ";" in code:
+            results = []
+            for stmt in code.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    r = self._dispatch(stmt)
+                    if r is not None:
+                        results.append(r)
+            return "\r\n".join(results) if results else None
+
+        code = code.strip()
+
+        # ── motor.run(port.X, vel) ─────────────────────────────────
+        m = re.match(r"motor\.run\(([^,]+),\s*(-?\d+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            vel = int(m.group(2))
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.start(vel // 10)  # vel deg/s → speed %
+                logger.debug(f"motor.run port={port_idx} vel={vel}")
+            return None
+
+        # ── motor.stop(port.X, stop=motor.MODE) ───────────────────
+        m = re.match(r"motor\.stop\(([^,)]+)(?:,\s*stop=(.+))?\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            stop_mode = _stop(m.group(2)) if m.group(2) else 0
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.stop(stop_mode)
+                logger.debug(f"motor.stop port={port_idx} mode={stop_mode}")
+            return None
+
+        # ── motor.run_for_degrees(port.X, deg, vel) ───────────────
+        m = re.match(r"motor\.run_for_degrees\(([^,]+),\s*(-?\d+),\s*(-?\d+)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            degrees = int(m.group(2))
+            vel = int(m.group(3))
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.run_degrees(vel // 10, degrees, 0)
+                logger.debug(f"motor.run_for_degrees port={port_idx} deg={degrees}")
+            return None
+
+        # ── motor.run_for_time(port.X, ms, vel) ───────────────────
+        m = re.match(r"motor\.run_for_time\(([^,]+),\s*(\d+),\s*(-?\d+)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            time_ms = int(m.group(2))
+            vel = int(m.group(3))
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.run_timed(vel // 10, time_ms, 0)
+                logger.debug(f"motor.run_for_time port={port_idx} ms={time_ms}")
+            return None
+
+        # ── motor.go_to_absolute_position(port.X, pos, vel, ...) ──
+        m = re.match(r"motor\.go_to_absolute_position\(([^,]+),\s*(-?\d+),\s*(-?\d+)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            pos = int(m.group(2))
+            vel = int(m.group(3))
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.go_to_position(vel // 10, pos, 0)
+                logger.debug(f"motor.go_to_absolute_position port={port_idx} pos={pos}")
+            return None
+
+        # ── motor.reset_relative_position(port.X, offset) ─────────
+        m = re.match(r"motor\.reset_relative_position\(([^,]+),\s*(-?\d+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            offset = int(m.group(2))
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.set_position_offset(offset)
+            return None
+
+        # ── hub.display.show(hub.Image('...')) ────────────────────────
+        m = re.match(r"hub\.display\.show\((?:hub\.)?Image\('([0-9:]{29})'\)\)", code)
+        if m:
+            img_str = m.group(1)
+            digits = img_str.replace(":", "")
+            # Scale 0-9 → 0-100 brightness
+            pixels = [int(c) * 11 for c in digits]
+            self.hub.matrix.pixels = pixels
+            logger.debug("display.show image set")
+            return None
+
+        # ── hub.display.off() ──────────────────────────────────────
+        if code == "hub.display.off()":
+            self.hub.matrix.clear()
+            return None
+
+        # ── hub.display.pixel(x, y, b) ─────────────────────────────
+        m = re.match(r"hub\.display\.pixel\((\d+),\s*(\d+),\s*(\d+)\)", code)
+        if m:
+            x, y, b = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            self.hub.matrix.set_pixel(x, y, b * 11)
+            return None
+
+        # ── hub.sound.beep(freq, dur, vol) ─────────────────────────
+        m = re.match(r"hub\.sound\.beep\((\d+(?:\.\d+)?),\s*(\d+),\s*(\d+)\)", code)
+        if m:
+            freq = float(m.group(1))
+            dur = int(m.group(2))
+            vol = int(m.group(3))
+            self.hub.sound_playing = True
+            self.hub.sound_volume = vol
+            logger.debug(f"sound.beep freq={freq}Hz dur={dur}ms vol={vol}")
+            return None
+
+        # ── hub.sound.stop() ───────────────────────────────────────
+        if code == "hub.sound.stop()":
+            self.hub.sound_playing = False
+            return None
+
+        # ── hub.motion_sensor.reset_yaw_angle() ────────────────────
+        if code == "hub.motion_sensor.reset_yaw_angle()":
+            self.hub.imu.yaw = 0
+            logger.debug("reset_yaw_angle → 0")
+            return None
+
+        # ── hub.light.color(n) ─────────────────────────────────────
+        m = re.match(r"hub\.light\.color\((\d+)\)", code)
+        if m:
+            logger.debug(f"hub light color={m.group(1)}")
+            return None
+
+        # ── hub.light.off() ────────────────────────────────────────
+        if code == "hub.light.off()":
+            return None
+
+        # ── port.X.device.write([...]) — color matrix ──────────────
+        m = re.match(r"port\.([A-F])\.device\.write\(\[(.+)\]\)", code)
+        if m:
+            logger.debug(f"color_matrix write port={m.group(1)}")
+            return None
+
+        # ── hub.battery.capacity_left() ────────────────────────────
+        if "hub.battery.capacity_left()" in code:
+            return str(self.hub.battery_level)
+
+        # ── hub.battery.charger_connected() ────────────────────────
+        if "hub.battery.charger_connected()" in code:
+            return "False"
+
+        # ── hub.motion_sensor.tilt_angles() ───────────────────────
+        if "hub.motion_sensor.tilt_angles()" in code:
+            imu = self.hub.imu
+            return f"({imu.yaw}, {imu.pitch}, {imu.roll})"
+
+        # ── hub.motion_sensor.acceleration() ──────────────────────
+        if "hub.motion_sensor.acceleration()" in code:
+            imu = self.hub.imu
+            return f"({imu.accel_x}, {imu.accel_y}, {imu.accel_z})"
+
+        # ── hub.motion_sensor.gyroscope() ─────────────────────────
+        if "hub.motion_sensor.gyroscope()" in code:
+            return "(0, 0, 0)"
+
+        # ── motor.get_position(port.X) ─────────────────────────────
+        m = re.match(r"motor\.get_position\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            motor = self.hub.get_motor(port_idx)
+            return str(motor.position if motor else 0)
+
+        # ── motor.get_speed(port.X) ────────────────────────────────
+        m = re.match(r"motor\.get_speed\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            motor = self.hub.get_motor(port_idx)
+            return str(motor.speed if motor else 0)
+
+        # ── motor.get_duty_cycle(port.X) ───────────────────────────
+        m = re.match(r"motor\.get_duty_cycle\(([^)]+)\)", code)
+        if m:
+            return "0"
+
+        # ── print(...) — ignore ────────────────────────────────────
+        if code.startswith("print("):
+            return None
+
+        logger.warning(f"Console: unrecognized REPL code: {code!r}")
+        return None

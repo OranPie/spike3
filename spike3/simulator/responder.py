@@ -41,6 +41,7 @@ class ProtocolResponder:
         self.hub = hub
         self._send = send_fn
         self.on_tunnel: Optional[Callable[[bytes], None]] = None
+        self.on_console: Optional[Callable[[str], None]] = None
 
     def send_response(self, raw: bytes):
         """COBS-encode and send response bytes."""
@@ -219,6 +220,13 @@ class ProtocolResponder:
         if self.on_tunnel:
             self.on_tunnel(tunnel_data)
 
+    def _handle_console_notification(self, payload: bytes):
+        """ConsoleNotification (msg_id=33): Python REPL code from host."""
+        # Payload: UTF-8 text + optional null terminator
+        text = payload.rstrip(b"\x00").decode("utf-8", errors="replace")
+        if self.on_console:
+            self.on_console(text)
+
     def _handle_begin_fw_update(self, payload: bytes):
         # Firmware update — just ACK it (we don't actually update)
         self.send_response(bytes([MsgId.BEGIN_FW_UPDATE_RESP, Status.ACK]))
@@ -261,6 +269,7 @@ class ProtocolResponder:
         MsgId.LIST_PATH_REQ: _handle_list_path,
         MsgId.DELETE_PATH_REQ: _handle_delete_path,
         MsgId.TUNNEL_MESSAGE: _handle_tunnel_message,
+        MsgId.CONSOLE_NOTIFICATION: _handle_console_notification,
         MsgId.BEGIN_FW_UPDATE_REQ: _handle_begin_fw_update,
         MsgId.START_FW_UPLOAD_REQ: _handle_start_fw_upload,
     }
