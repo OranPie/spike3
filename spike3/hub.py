@@ -19,7 +19,7 @@ from .enums import (
     LEGO_VENDOR_ID, ProductId, HubType, ConnectionType,
     DEFAULT_TIMEOUT, SETUP_TIMEOUT, RESPONSE_TO_REQUEST,
 )
-from .transport import Transport, UsbTransport, BleTransport
+from .transport import Transport, UsbTransport, BleTransport, TcpTransport
 
 logger = logging.getLogger("spike3")
 
@@ -108,6 +108,31 @@ class Hub:
         transport.open()
         hub = cls(transport, protocol)
         logger.info(f"Connected to hub via BLE: {address}")
+        return hub
+
+    @classmethod
+    def connect_tcp(cls, host: str = "127.0.0.1", port: int = 51337,
+                    protocol: str = "atlantis") -> "Hub":
+        """Connect to a SPIKE hub (or simulator) via raw TCP.
+
+        Used primarily on Windows where PTY is unavailable. Connect to
+        the simulator's TcpComBridge::
+
+            # Terminal 1 — start simulator
+            python -m spike3.simulator --tcp --tcp-port 51337
+
+            # Terminal 2 — connect
+            hub = Hub.connect_tcp("127.0.0.1", 51337)
+
+        Args:
+            host: TCP host (default 127.0.0.1).
+            port: TCP port (default 51337).
+            protocol: 'atlantis' (default) or 'micropython'.
+        """
+        transport = TcpTransport(host, port)
+        transport.open()
+        hub = cls(transport, protocol)
+        logger.info(f"Connected to hub via TCP: {host}:{port}")
         return hub
 
     @staticmethod

@@ -74,9 +74,27 @@ class ComServer:
         return self._port
 
     def start(self):
-        """Create PTY pair and start the simulator."""
+        """Create PTY pair and start the simulator.
+
+        On Windows, PTY is unavailable. Use TcpComBridge instead::
+
+            from spike3.simulator import TcpComBridge
+            server = TcpComBridge(hub, port=51337)
+            server.start()
+            # Connect with: Hub.connect_tcp("127.0.0.1", 51337)
+        """
         if self._running:
             return
+
+        if platform.system() == "Windows":
+            raise RuntimeError(
+                "PTY virtual serial is not available on Windows.\n"
+                "Use TcpComBridge instead:\n\n"
+                "    python -m spike3.simulator --tcp --tcp-port 51337\n"
+                "    # Then connect with: Hub.connect_tcp('127.0.0.1', 51337)\n\n"
+                "For a real Windows virtual COM port, install com0com:\n"
+                "    https://sourceforge.net/projects/com0com/"
+            )
 
         self._create_pty()
         self._responder = ProtocolResponder(self.hub, self._write_to_master)
@@ -132,12 +150,6 @@ class ComServer:
 
     def _create_pty(self):
         """Create a PTY pair for virtual serial communication."""
-        if platform.system() == "Windows":
-            raise RuntimeError(
-                "PTY not available on Windows. Use com0com to create a "
-                "virtual COM pair, then pass one end via --port argument."
-            )
-
         import pty
         master_fd, slave_fd = pty.openpty()
         self._master_fd = master_fd

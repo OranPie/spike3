@@ -301,3 +301,111 @@ class BleTransport(Transport):
             {"address": d.address, "name": d.name or "Unknown", "rssi": d.rssi}
             for d in devices
         ]
+
+
+# ── TCP Transport ──────────────────────────────────────────────────
+
+class TcpTransport(Transport):
+    """Raw TCP socket transport for connecting to the simulator's TcpComBridge.
+
+    Allows the spike3 library (and hub_tui) to connect to the SPIKE 3
+    simulator over a plain TCP connection — the primary connectivity
+    mechanism on Windows where PTY is unavailable.
+
+    Usage::
+
+        transport = TcpTransport("127.0.0.1", 51337)
+        transport.open()
+        hub = Hub(transport)
+
+    Or via factory::
+
+        hub = Hub.connect_tcp("127.0.0.1", 51337)
+    """
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 51337):
+        self._host = host
+        self._port = port
+        self._sock = None
+        self._on_data: Optional[Callable[[bytes], None]] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._running = False
+
+    def open(self) -> None:
+        import socket
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.settimeout(5.0)
+        self._sock.connect((self._host, self._port))
+        self._sock.settimeout(0.1)
+        self._running = True
+        logger.info(f"Connected via TCP: {self._host}:{self._port}")
+        if self._on_data:
+            self._start_reader()
+
+    def close(self) -> None:
+        self._running = False
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=2.0)
+        if self._sock:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+        logger.info(f"Closed TCP connection: {self._host}:{self._port}")
+
+    def write(self, data: bytes) -> None:
+        if not self._sock:
+            raise IOError("TCP socket not connected")
+        logger.debug(f"TX ({len(data)}): {data.hex(' ')}")
+        self._sock.sendall(data)
+
+    def read(self, size: int = 4096, timeout: float = 1.0) -> bytes:
+        if not self._sock:
+            raise IOError("TCP socket not connected")
+        import socket
+        old_timeout = self._sock.gettimeout()
+        self._sock.settimeout(timeout)
+        try:
+            return self._sock.recv(size) or b""
+        except socket.timeout:
+            return b""
+        finally:
+            self._sock.settimeout(old_timeout)
+
+    @property
+    def is_open(self) -> bool:
+        return self._sock is not None and self._running
+
+    def set_on_data(self, callback: Optional[Callable[[bytes], None]]) -> None:
+        self._on_data = callback
+        if self.is_open and callback and (
+            self._reader_thread is None or not self._reader_thread.is_alive()
+        ):
+            self._start_reader()
+
+    def _start_reader(self):
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, daemon=True, name="spike3-tcp-reader"
+        )
+        self._reader_thread.start()
+
+    def _reader_loop(self):
+        import socket
+        logger.debug("TCP reader thread started")
+        while self._running and self._sock:
+            try:
+                data = self._sock.recv(4096)
+                if not data:
+                    logger.info("TCP server closed connection")
+                    break
+                logger.debug(f"RX ({len(data)}): {data.hex(' ')}")
+                if self._on_data:
+                    self._on_data(data)
+            except socket.timeout:
+                continue
+            except OSError as e:
+                if self._running:
+                    logger.error(f"TCP read error: {e}")
+                break
+        logger.debug("TCP reader thread exiting")
