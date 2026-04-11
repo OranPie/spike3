@@ -55,6 +55,12 @@ from .micropython import (
     MessageAccumulator as MpMessageAccumulator,
 )
 from . import tunnel
+from .llsp3 import (
+    LLSP3File, parse_llsp3,
+    build_python_llsp3, build_scratch_llsp3,
+    BlockBuilder, scratch_blocks_to_python,
+    upload_llsp3, upload_python_file, upload_python_string,
+)
 
 __all__ = [
     "Hub",
@@ -95,4 +101,9 @@ __all__ = [
     "mp_parse_message", "MpMessageAccumulator",
     # Tunnel
     "tunnel",
+    # LLSP3
+    "LLSP3File", "parse_llsp3",
+    "build_python_llsp3", "build_scratch_llsp3",
+    "BlockBuilder", "scratch_blocks_to_python",
+    "upload_llsp3", "upload_python_file", "upload_python_string",
 ]

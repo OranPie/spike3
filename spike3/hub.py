@@ -1138,6 +1138,73 @@ class Hub:
 
         logger.info(f"Uploaded {filename} ({len(data)} bytes) to slot {slot}")
 
+    # ── LLSP3 / Program Upload Helpers ─────────────────────────────
+
+    def upload_llsp3(self, path: str, *, slot: int | None = None,
+                     compile_scratch: bool = True,
+                     on_progress=None,
+                     timeout: float = 20.0) -> dict:
+        """Upload an .llsp3 project file to the hub.
+
+        For Python-mode projects: extracts source and uploads directly.
+        For Scratch-mode projects: compiles blocks to MicroPython first.
+
+        Args:
+            path: Path to the .llsp3 file.
+            slot: Override slot from manifest (0–19).
+            compile_scratch: If True, compile Scratch blocks to Python.
+            on_progress: Optional callback(bytes_sent, total).
+            timeout: Per-chunk timeout.
+
+        Returns:
+            Dict with upload info (name, type, slot, source_size, …).
+        """
+        from .llsp3 import upload_llsp3 as _upload
+        return _upload(self, path, slot=slot, compile_scratch=compile_scratch,
+                       on_progress=on_progress, timeout=timeout)
+
+    def upload_python_file(self, path: str, *, slot: int = 0,
+                           on_progress=None,
+                           timeout: float = 20.0) -> dict:
+        """Upload a .py file directly to the hub.
+
+        Args:
+            path: Path to the Python source file.
+            slot: Target program slot (0–19).
+            on_progress: Optional callback(bytes_sent, total).
+            timeout: Per-chunk timeout.
+
+        Returns:
+            Dict with upload info.
+        """
+        from .llsp3 import upload_python_file as _upload
+        return _upload(self, path, slot=slot,
+                       on_progress=on_progress, timeout=timeout)
+
+    def upload_python(self, source: str, *, name: str = "program",
+                      slot: int = 0, run: bool = False,
+                      on_progress=None,
+                      timeout: float = 20.0) -> dict:
+        """Upload a Python source string to the hub.
+
+        Args:
+            source: MicroPython source code.
+            name: Program name (for logging).
+            slot: Target program slot (0–19).
+            run: If True, start the program after upload.
+            on_progress: Optional callback(bytes_sent, total).
+            timeout: Per-chunk timeout.
+
+        Returns:
+            Dict with upload info.
+        """
+        from .llsp3 import upload_python_string as _upload
+        result = _upload(self, source, name=name, slot=slot,
+                         on_progress=on_progress, timeout=timeout)
+        if run:
+            self.start_program(slot)
+        return result
+
     # ── High-level MicroPython API ──────────────────────────────────
 
     def mp_call(self, method: str, params: Any = None,
