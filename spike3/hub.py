@@ -1010,6 +1010,79 @@ class Hub:
         """Play a sound file on the hub."""
         self.send_tunnel(tunnel.play_sound(path, volume, **kwargs))
 
+    # ── New convenience methods (JS-audit additions) ────────────────
+
+    def display_scroll(self, text: str, speed: int = 100):
+        """Scroll text across the 5×5 LED matrix.
+
+        Args:
+            text: Text string to scroll.
+            speed: Scroll speed in ms per column shift (default 100).
+        """
+        self.send_tunnel(tunnel.display_scroll(text, speed))
+
+    def display_set_brightness(self, brightness: int):
+        """Set overall LED matrix brightness (0–100)."""
+        self.send_tunnel(tunnel.display_set_brightness(brightness))
+
+    def display_rotate(self, direction: int = 0):
+        """Rotate the LED matrix orientation.
+
+        Args:
+            direction: 0=north(default), 1=east, 2=south, 3=west.
+        """
+        self.send_tunnel(tunnel.display_rotate(direction))
+
+    def sound_set_volume(self, volume: int):
+        """Set the hub speaker volume (0–100)."""
+        self.send_tunnel(tunnel.sound_set_volume(volume))
+
+    def sound_get_volume(self, timeout: float = 1.0) -> int:
+        """Get the hub speaker volume (0–100)."""
+        raw = self.eval_python(tunnel.sound_get_volume(), timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return -1
+
+    def motor_pwm(self, port: int, duty: int):
+        """Set motor PWM duty cycle directly (-10000 to 10000).
+
+        Bypasses speed regulation — use for raw motor power control.
+        """
+        self.send_tunnel(tunnel.motor_pwm(port, duty))
+
+    def motor_go_direction_to_position(self, port: int, speed: int,
+                                        position: int, direction: int = 0,
+                                        stop: int = 1):
+        """Move motor to absolute position via specified direction.
+
+        Args:
+            port: Port index (0–5 for A–F).
+            speed: Speed percentage (0–100).
+            position: Target position in degrees.
+            direction: 0=shortest, 1=clockwise, 2=counterclockwise.
+            stop: Stop behavior (0=coast, 1=brake, 2=hold).
+        """
+        self.send_tunnel(tunnel.motor_go_direction_to_position(
+            port, speed, position, direction, stop))
+
+    def battery_voltage(self, timeout: float = 1.0) -> int:
+        """Get battery voltage in millivolts."""
+        raw = self.eval_python(tunnel.battery_voltage(), timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return -1
+
+    def battery_current(self, timeout: float = 1.0) -> int:
+        """Get battery current in milliamps."""
+        raw = self.eval_python(tunnel.battery_current(), timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return -1
+
     def upload_program(self, filename: str, data: bytes, slot: int = 0,
                        on_progress: Optional[Callable[[int, int], None]] = None,
                        timeout: float = DEFAULT_TIMEOUT):

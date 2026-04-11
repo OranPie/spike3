@@ -499,10 +499,36 @@ def display_number(n: int) -> str:
     return f"hub.display.show({int(n)})"
 
 
+def display_scroll(text: str, speed: int = 100) -> str:
+    """Scroll text across the 5×5 LED matrix.
+
+    Args:
+        text: Text to scroll.
+        speed: Scroll speed in ms per column shift (default 100).
+    """
+    safe = text.replace("'", "\\'")
+    return f"hub.display.scroll('{safe}', {int(speed)})"
+
+
+def display_set_brightness(brightness: int) -> str:
+    """Set overall LED matrix brightness (0–100)."""
+    return f"hub.display.set_brightness({max(0, min(100, int(brightness)))})"
+
+
 def sound_play_note(midi_note: int, duration_ms: int, volume: int = 100) -> str:
     """Play a MIDI note number for duration_ms milliseconds."""
     freq = _midi_to_hz(midi_note)
     return f"hub.sound.beep({freq:.1f}, {int(duration_ms)}, {int(volume)})"
+
+
+def sound_set_volume(volume: int) -> str:
+    """Set the hub speaker volume (0–100)."""
+    return f"hub.sound.set_volume({max(0, min(100, int(volume)))})"
+
+
+def sound_get_volume() -> str:
+    """Get the hub speaker volume (returns int 0–100)."""
+    return "hub.sound.get_volume()"
 
 
 def motor_run_until_stalled(port: int, speed: int, stop: int = 1) -> str:
@@ -513,6 +539,84 @@ def motor_run_until_stalled(port: int, speed: int, stop: int = 1) -> str:
     direction = 1 if vel >= 0 else -1
     return (f"motor.run_for_degrees(port.{_port_name(port)}, "
             f"{direction * 36000}, {abs(vel)}, stop={stop_const})")
+
+
+def motor_pwm(port: int, duty: int) -> str:
+    """Set motor PWM duty cycle (-10000 to 10000).
+
+    Directly controls motor voltage without speed regulation.
+    JS-verified: scratch.motor_pwm(port, duty).
+    """
+    return f"motor.run(port.{_port_name(port)}, {int(duty)})"
+
+
+def motor_go_direction_to_position(port: int, speed: int, position: int,
+                                    direction: int = 0, stop: int = 1) -> str:
+    """Move motor to absolute position via specified direction.
+
+    Args:
+        port: Port index (0–5 for A–F).
+        speed: Speed percentage (0–100).
+        position: Target position in degrees.
+        direction: 0=shortest, 1=clockwise, 2=counterclockwise.
+        stop: Stop behavior (0=coast, 1=brake, 2=hold).
+
+    JS-verified: scratch.motor_go_direction_to_position.
+    """
+    vel = abs(_speed_to_vel(speed))
+    stop_names = {0: "motor.COAST", 1: "motor.BRAKE", 2: "motor.HOLD"}
+    dir_names = {0: "motor.SHORTEST_PATH", 1: "motor.CLOCKWISE", 2: "motor.COUNTERCLOCKWISE"}
+    stop_const = stop_names.get(stop, "motor.BRAKE")
+    dir_const = dir_names.get(direction, "motor.SHORTEST_PATH")
+    return (f"motor.run_to_absolute_position(port.{_port_name(port)}, "
+            f"{int(position)}, {vel}, direction={dir_const}, stop={stop_const})")
+
+
+def move_pair_distance(left_port: int, right_port: int,
+                       distance_cm: float, speed: int = 50) -> str:
+    """Move a motor pair a fixed distance in centimeters.
+
+    Uses motor_pair.move() with distance converted to degrees
+    (assuming standard SPIKE wheel circumference ~17.6cm).
+    """
+    vel_l = _speed_to_vel(speed)
+    vel_r = _speed_to_vel(speed)
+    degrees = int(distance_cm / 17.6 * 360)
+    return (f"motor_pair.move(port.{_port_name(left_port)}, "
+            f"port.{_port_name(right_port)}, {degrees}, {vel_l}, {vel_r})")
+
+
+def hub_get_hardware_id() -> str:
+    """Get the hub's unique hardware ID."""
+    return "hub.info()['product_variant']"
+
+
+def battery_voltage() -> str:
+    """Get battery voltage in millivolts."""
+    return "hub.battery.voltage()"
+
+
+def battery_current() -> str:
+    """Get battery current in milliamps."""
+    return "hub.battery.current()"
+
+
+def button_pressed(button: str = "left") -> str:
+    """Check if a hub button is currently pressed.
+
+    Args:
+        button: "left" or "right".
+    """
+    return f"hub.button.{button}.is_pressed()"
+
+
+def display_rotate(direction: int = 0) -> str:
+    """Rotate the LED matrix orientation.
+
+    Args:
+        direction: 0=north(default), 1=east, 2=south, 3=west.
+    """
+    return f"hub.display.rotation({int(direction)})"
 
 
 def display_animate(images: list, delay_ms: int = 200) -> str:

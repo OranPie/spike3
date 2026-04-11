@@ -522,6 +522,204 @@ class SoundModal(ModalScreen):
         self.dismiss()
 
 
+class HubLightModal(ModalScreen):
+    """Overlay for hub status light color control."""
+
+    DEFAULT_CSS = """
+    HubLightModal {
+        align: center middle;
+    }
+    HubLightModal > Container {
+        width: 50;
+        height: 14;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    COLORS = [
+        ("Off",       -1),
+        ("Black",      0), ("Pink",   1), ("Purple",  2),
+        ("Blue",       3), ("Azure",  4), ("Turquoise", 5),
+        ("Green",      6), ("Yellow", 7), ("Orange", 8),
+        ("Red",        9), ("White", 10),
+    ]
+
+    def __init__(self, hub: Hub, **kwargs):
+        super().__init__(**kwargs)
+        self._hub = hub
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label("💡  Hub Light Control", classes="modal-title")
+            yield Label("Select color:")
+            with Horizontal():
+                for name, val in self.COLORS:
+                    yield Button(name, id=f"light-{val}", variant="primary" if val >= 0 else "error")
+            yield Button("✕ Close", id="light-close")
+
+    @on(Button.Pressed)
+    def _on_button(self, event: Button.Pressed):
+        btn_id = event.button.id or ""
+        if btn_id == "light-close":
+            self.dismiss()
+            return
+        if btn_id.startswith("light-"):
+            val = int(btn_id.split("-")[1])
+            try:
+                if val < 0:
+                    self._hub.hub_light_off()
+                else:
+                    self._hub.hub_light_on(val)
+            except Exception as e:
+                logger.warning(f"Hub light failed: {e}")
+
+
+class ReplModal(ModalScreen):
+    """Interactive MicroPython REPL overlay."""
+
+    DEFAULT_CSS = """
+    ReplModal {
+        align: center middle;
+    }
+    ReplModal > Container {
+        width: 80;
+        height: 30;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #repl-output {
+        height: 1fr;
+        border: round $accent;
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self, hub: Hub, **kwargs):
+        super().__init__(**kwargs)
+        self._hub = hub
+        self._history: list[str] = []
+        self._hist_idx: int = -1
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label("🐍  MicroPython REPL", classes="modal-title")
+            yield RichLog(id="repl-output", highlight=True, markup=True)
+            yield Input(placeholder=">>> type Python code here", id="repl-input")
+            with Horizontal():
+                yield Button("Send", id="repl-send", variant="success")
+                yield Button("Ctrl-C", id="repl-int", variant="warning")
+                yield Button("✕ Close", id="repl-close")
+
+    @on(Input.Submitted, "#repl-input")
+    def _input_submitted(self, event: Input.Submitted):
+        self._execute()
+
+    @on(Button.Pressed, "#repl-send")
+    def _send(self):
+        self._execute()
+
+    def _execute(self):
+        inp = self.query_one("#repl-input", Input)
+        code = inp.value.strip()
+        if not code:
+            return
+        out = self.query_one("#repl-output", RichLog)
+        out.write(Text(f">>> {code}", style="bold cyan"))
+        self._history.append(code)
+        self._hist_idx = -1
+        inp.value = ""
+        self._do_eval(code)
+
+    @work(thread=True)
+    def _do_eval(self, code: str):
+        try:
+            result = self._hub.eval_python(code, timeout=5.0)
+            self.app.call_from_thread(
+                lambda: self.query_one("#repl-output", RichLog).write(
+                    Text(result or "(no output)", style="green" if result else "dim")
+                )
+            )
+        except Exception as e:
+            self.app.call_from_thread(
+                lambda: self.query_one("#repl-output", RichLog).write(
+                    Text(f"Error: {e}", style="bold red")
+                )
+            )
+
+    @on(Button.Pressed, "#repl-int")
+    def _interrupt(self):
+        try:
+            self._hub.mp_interrupt()
+            self.query_one("#repl-output", RichLog).write(
+                Text("^C (interrupt sent)", style="yellow"))
+        except Exception as e:
+            logger.warning(f"Interrupt failed: {e}")
+
+    @on(Button.Pressed, "#repl-close")
+    def _close(self):
+        self.dismiss()
+
+
+class BatteryModal(ModalScreen):
+    """Battery and power details overlay."""
+
+    DEFAULT_CSS = """
+    BatteryModal {
+        align: center middle;
+    }
+    BatteryModal > Container {
+        width: 45;
+        height: 14;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(self, hub: Hub, **kwargs):
+        super().__init__(**kwargs)
+        self._hub = hub
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label("🔋  Battery Info", classes="modal-title")
+            yield Static("Loading...", id="batt-info")
+            with Horizontal():
+                yield Button("🔄 Refresh", id="batt-refresh", variant="primary")
+                yield Button("✕ Close", id="batt-close")
+
+    def on_mount(self):
+        self._refresh_info()
+
+    @on(Button.Pressed, "#batt-refresh")
+    def _on_refresh(self):
+        self._refresh_info()
+
+    @work(thread=True)
+    def _refresh_info(self):
+        try:
+            pct = self._hub.get_battery()
+            voltage = self._hub.battery_voltage()
+            current = self._hub.battery_current()
+            charger = self._hub.charger_connected()
+            text = Text()
+            text.append(f"  Level:    ", style="bold")
+            text.append(f"{pct}%\n", style=_battery_color(pct))
+            text.append(f"  Voltage:  {voltage} mV\n")
+            text.append(f"  Current:  {current} mA\n")
+            text.append(f"  Charger:  {'🔌 Connected' if charger else '🔋 Battery'}\n")
+            self.app.call_from_thread(
+                lambda: self.query_one("#batt-info", Static).update(text)
+            )
+        except Exception as e:
+            self.app.call_from_thread(
+                lambda: self.query_one("#batt-info", Static).update(f"Error: {e}")
+            )
+
+
 class ProgramsModal(ModalScreen):
     """Overlay for program slot management."""
 
@@ -603,6 +801,9 @@ class DashboardScreen(Screen):
         Binding("d", "display",  "Display"),
         Binding("s", "sound",    "Sound"),
         Binding("p", "programs", "Programs"),
+        Binding("l", "light",    "Light"),
+        Binding("r", "repl",     "REPL"),
+        Binding("b", "battery",  "Battery"),
         Binding("y", "reset_yaw","Yaw Reset"),
         Binding("ctrl+d", "disconnect", "Disconnect"),
         Binding("q", "app.quit", "Quit"),
@@ -705,6 +906,15 @@ class DashboardScreen(Screen):
 
     def action_programs(self):
         self.app.push_screen(ProgramsModal(self._hub))
+
+    def action_light(self):
+        self.app.push_screen(HubLightModal(self._hub))
+
+    def action_repl(self):
+        self.app.push_screen(ReplModal(self._hub))
+
+    def action_battery(self):
+        self.app.push_screen(BatteryModal(self._hub))
 
     def action_reset_yaw(self):
         try:

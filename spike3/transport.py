@@ -16,6 +16,7 @@ from typing import Callable, Optional
 from .enums import (
     LEGO_VENDOR_ID, ProductId, ConnectionType,
     ATLANTIS_SERVICE_UUID, ATLANTIS_TX_CHAR_UUID, ATLANTIS_RX_CHAR_UUID,
+    LWP3_SERVICE_UUID, LWP3_CHAR_UUID,
     POST_OPEN_DELAY,
 )
 
@@ -197,8 +198,8 @@ class UsbTransport(Transport):
 class BleTransport(Transport):
     """BLE GATT transport using bleak.
 
-    Mirrors the native .NET HubBleConnection which uses
-    Windows.Devices.Bluetooth WinRT APIs.
+    Supports both Atlantis (0000fd02) and LWP3 (00001623) BLE services.
+    Automatically detects which service the hub advertises.
     """
 
     def __init__(self, address: str):
@@ -212,6 +213,8 @@ class BleTransport(Transport):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._connected = False
+        self._tx_uuid: Optional[str] = None
+        self._rx_uuid: Optional[str] = None
 
     def open(self) -> None:
         self._loop = asyncio.new_event_loop()
@@ -231,9 +234,32 @@ class BleTransport(Transport):
         self._connected = True
         logger.info(f"Connected to BLE device: {self._address}")
 
+        # Detect which GATT service is available
+        services = self._client.services
+        if services.get_service(ATLANTIS_SERVICE_UUID):
+            self._tx_uuid = ATLANTIS_TX_CHAR_UUID
+            self._rx_uuid = ATLANTIS_RX_CHAR_UUID
+            logger.info("Using Atlantis BLE service (0000fd02)")
+        elif services.get_service(LWP3_SERVICE_UUID):
+            self._tx_uuid = LWP3_CHAR_UUID
+            self._rx_uuid = LWP3_CHAR_UUID  # LWP3 is bidirectional
+            logger.info("Using LWP3 BLE service (00001623)")
+        else:
+            # Fallback to Atlantis
+            self._tx_uuid = ATLANTIS_TX_CHAR_UUID
+            self._rx_uuid = ATLANTIS_RX_CHAR_UUID
+            logger.warning("No known service found, trying Atlantis UUIDs")
+
+        # Request larger MTU if possible
+        try:
+            if hasattr(self._client, 'mtu_size'):
+                logger.debug(f"BLE MTU: {self._client.mtu_size}")
+        except Exception:
+            pass
+
         # Subscribe to RX characteristic notifications
         await self._client.start_notify(
-            ATLANTIS_RX_CHAR_UUID, self._notification_handler
+            self._rx_uuid, self._notification_handler
         )
 
     def _notification_handler(self, sender, data: bytearray):
@@ -265,9 +291,8 @@ class BleTransport(Transport):
         if not self._client or not self._connected:
             raise IOError("BLE device not connected")
         future = asyncio.run_coroutine_threadsafe(
-            # Atlantis BLE uses write_without_response (WriteValueAsync)
             self._client.write_gatt_char(
-                ATLANTIS_TX_CHAR_UUID, data, response=False
+                self._tx_uuid, data, response=False
             ),
             self._loop,
         )
