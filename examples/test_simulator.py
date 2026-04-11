@@ -294,8 +294,48 @@ def main():
     except Exception as e:
         test("New tunnel commands", False, str(e))
 
-    # 14. Cleanup
-    print("\n[14] Cleanup...")
+    # 14. Expanded feature tests
+    print("\n[14] Testing expanded features...")
+    try:
+        hub.display_scroll("Hi", 100)
+        time.sleep(0.2)
+        test("display_scroll() sent without error", True)
+
+        hub.display_set_brightness(80)
+        time.sleep(0.2)
+        test("display_set_brightness() sent without error", True)
+
+        hub.display_rotate(2)
+        time.sleep(0.2)
+        test("display_rotate() sent without error", True)
+
+        hub.sound_set_volume(75)
+        time.sleep(0.2)
+        test("sound_set_volume() sent without error", True)
+
+        vol = hub.sound_get_volume()
+        test("sound_get_volume() returns int", isinstance(vol, int))
+
+        hub.motor_pwm(0, 3000)
+        time.sleep(0.2)
+        test("motor_pwm() sent without error", True)
+        hub.motor_stop(0)
+        time.sleep(0.1)
+
+        bv = hub.battery_voltage()
+        test("battery_voltage() returns int", isinstance(bv, int))
+        test("battery_voltage() > 0", bv > 0)
+
+        bc = hub.battery_current()
+        test("battery_current() returns int", isinstance(bc, int))
+
+        abs_pos = hub.motor_absolute_position(0)
+        test("motor_absolute_position() returns int", isinstance(abs_pos, int))
+    except Exception as e:
+        test("Expanded features", False, str(e))
+
+    # 15. Cleanup
+    print("\n[15] Cleanup...")
 
     try:
         hub.set_notification_interval(0)

@@ -415,6 +415,73 @@ class ConsoleHandler:
             logger.debug(f"display.show number={m.group(1)}")
             return None
 
+        # ── hub.display.scroll(text, speed) ────────────────────────
+        m = re.match(r"hub\.display\.scroll\('([^']*)',\s*(\d+)\)", code)
+        if m:
+            logger.debug(f"display.scroll text={m.group(1)} speed={m.group(2)}")
+            return None
+
+        # ── hub.display.set_brightness(n) ──────────────────────────
+        m = re.match(r"hub\.display\.set_brightness\((\d+)\)", code)
+        if m:
+            logger.debug(f"display.set_brightness={m.group(1)}")
+            return None
+
+        # ── hub.display.rotation(n) ────────────────────────────────
+        m = re.match(r"hub\.display\.rotation\((\d+)\)", code)
+        if m:
+            logger.debug(f"display.rotation={m.group(1)}")
+            return None
+
+        # ── hub.sound.set_volume(n) ────────────────────────────────
+        m = re.match(r"hub\.sound\.set_volume\((\d+)\)", code)
+        if m:
+            self.hub.volume = int(m.group(1))
+            return None
+
+        # ── hub.sound.get_volume() ─────────────────────────────────
+        if code == "hub.sound.get_volume()":
+            return str(getattr(self.hub, 'volume', 100))
+
+        # ── hub.battery.voltage() / current() ─────────────────────
+        if code == "hub.battery.voltage()":
+            return str(getattr(self.hub, 'battery_voltage', 7200))
+        if code == "hub.battery.current()":
+            return str(getattr(self.hub, 'battery_current', 150))
+
+        # ── hub.button.left/right.is_pressed() ────────────────────
+        if code == "hub.button.left.is_pressed()":
+            return "True" if self.hub.button_left_pressed else "False"
+        if code == "hub.button.right.is_pressed()":
+            return "True" if self.hub.button_right_pressed else "False"
+
+        # ── hub.info() ─────────────────────────────────────────────
+        if code == "hub.info()":
+            return "{'product_variant': 0}"
+        m = re.match(r"hub\.info\(\)\['([^']+)'\]", code)
+        if m:
+            return "0"
+
+        # ── motor.run(port, duty) — PWM ────────────────────────────
+        m = re.match(r"motor\.run\(([^,]+),\s*(-?\d+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            duty = int(m.group(2))
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.speed = max(-100, min(100, duty // 100))
+            return None
+
+        # ── motor.run_to_absolute_position(...) ────────────────────
+        m = re.match(r"motor\.run_to_absolute_position\(([^,]+),\s*(-?\d+)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            position = int(m.group(2))
+            motor = self.hub.get_motor(port_idx)
+            if motor:
+                motor.position = position
+            return None
+
         # ── print(...) — ignore ────────────────────────────────────
         if code.startswith("print("):
             return None

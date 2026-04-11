@@ -63,6 +63,13 @@ class HubState:
         # Hub temperature (°C)
         self.hub_temperature: int = 28
 
+        # Sound volume (0–100)
+        self.volume: int = 100
+
+        # Battery details
+        self.battery_voltage: int = 7200  # millivolts
+        self.battery_current: int = 150   # milliamps
+
         # Hub-internal devices
         self.imu = IMU()
         self.matrix = Matrix5x5()
