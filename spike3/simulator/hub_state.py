@@ -57,8 +57,8 @@ class HubState:
         self.button_left_was_pressed: bool = False
         self.button_right_was_pressed: bool = False
 
-        # IMU gesture
-        self.gesture: int = 0  # 0=none 1=shake 2=freefall 3=tapped 4=double_tapped
+        # IMU gesture (JS values: -1=none 0=tapped 1=double_tapped 2=collision 3=shake 4=freefall)
+        self.gesture: int = -1
 
         # Hub temperature (°C)
         self.hub_temperature: int = 28
@@ -200,7 +200,7 @@ class HubState:
             self.button_right = False
 
     def trigger_gesture(self, gesture: int):
-        """Simulate an IMU gesture (1=shake 2=freefall 3=tapped 4=double_tapped)."""
+        """Simulate an IMU gesture (-1=none 0=tapped 1=double_tapped 2=collision 3=shake 4=freefall)."""
         self.gesture = gesture
 
     # ── Display helpers ────────────────────────────────────────────

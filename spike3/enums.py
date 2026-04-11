@@ -162,7 +162,17 @@ class Color(IntEnum):
 
 
 class DeviceType(IntEnum):
-    """LPF2 device type IDs (appear in MotorNotification.device_id)."""
+    """LPF2 device type IDs (appear in MotorNotification.device_id).
+
+    Verified against JS: t.LPF2_* constants at line 6217.
+    """
+    SIMPLE_LIGHT = 8
+    WEDO_TILT = 34
+    WEDO_MOTION = 35
+    BOOST_VISION = 37
+    BOOST_EXTERNAL_MOTOR = 38
+    CONVOY_L_MOTOR = 46
+    CONVOY_XL_MOTOR = 47
     MOTOR_MEDIUM = 48       # SPIKE Prime Medium Motor (0x30)
     MOTOR_LARGE = 49        # SPIKE Prime Large Motor  (0x31)
     ACCELERATION = 57
@@ -177,12 +187,16 @@ class DeviceType(IntEnum):
 
 
 class Gesture(IntEnum):
-    """IMU gesture IDs returned by hub.motion_sensor.get_gesture()."""
-    NONE = 0
-    SHAKE = 1
-    FREEFALL = 2
-    TAPPED = 3
-    DOUBLE_TAPPED = 4
+    """IMU gesture IDs (from JS DeviceNotification / MicroPython runtime).
+
+    Verified against JS source: t.NG gesture enum at line ~2050.
+    """
+    NONE = -1
+    TAPPED = 0
+    DOUBLE_TAPPED = 1
+    COLLISION = 2
+    SHAKE = 3
+    FREEFALL = 4
 
 
 # ── MicroPython JSON-RPC notification IDs ───────────────────────────

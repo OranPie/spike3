@@ -635,13 +635,18 @@ class Hub:
             return 0
 
     def raw_rgb(self, port: int, timeout: float = 2.0) -> tuple:
-        """Read raw (red, green, blue) from color sensor on *port* (each 0–1024)."""
-        r = self.eval_python(f"color_sensor.get_red(port.{_PORT_NAMES[port]})", timeout)
-        g = self.eval_python(f"color_sensor.get_green(port.{_PORT_NAMES[port]})", timeout)
-        b = self.eval_python(f"color_sensor.get_blue(port.{_PORT_NAMES[port]})", timeout)
+        """Read raw (red, green, blue) from color sensor on *port* (each 0–1024).
+
+        Uses ``color_sensor.rgbi()`` which returns (r, g, b, intensity).
+        We return only the first three components.
+        """
+        raw = self.eval_python(
+            f"color_sensor.rgbi(port.{_PORT_NAMES[port]})", timeout)
         try:
-            return int(r), int(g), int(b)
-        except (ValueError, TypeError):
+            # rgbi() returns a tuple like (123, 456, 789, 100)
+            vals = eval(raw)  # safe: comes from hub firmware
+            return int(vals[0]), int(vals[1]), int(vals[2])
+        except Exception:
             return 0, 0, 0
 
     def force(self, port: int, timeout: float = 1.0) -> float:
@@ -669,18 +674,33 @@ class Hub:
             return -1
 
     def motor_position(self, port: int, timeout: float = 1.0) -> int:
-        """Read cumulative motor encoder position on *port* (degrees)."""
+        """Read relative motor encoder position on *port* (degrees).
+
+        Uses ``motor.relative_position()`` (JS-verified API name).
+        """
         raw = self.eval_python(
-            f"motor.get_position(port.{_PORT_NAMES[port]})", timeout)
+            f"motor.relative_position(port.{_PORT_NAMES[port]})", timeout)
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return 0
+
+    def motor_absolute_position(self, port: int, timeout: float = 1.0) -> int:
+        """Read absolute motor encoder position on *port* (degrees, -180..179)."""
+        raw = self.eval_python(
+            f"motor.absolute_position(port.{_PORT_NAMES[port]})", timeout)
         try:
             return int(raw)
         except (ValueError, TypeError):
             return 0
 
     def motor_speed(self, port: int, timeout: float = 1.0) -> int:
-        """Read motor speed on *port* (deg/s)."""
+        """Read motor speed on *port* (deg/s).
+
+        Uses ``motor.velocity()`` (JS-verified API name).
+        """
         raw = self.eval_python(
-            f"motor.get_speed(port.{_PORT_NAMES[port]})", timeout)
+            f"motor.velocity(port.{_PORT_NAMES[port]})", timeout)
         try:
             return int(raw)
         except (ValueError, TypeError):
@@ -721,13 +741,13 @@ class Hub:
     def get_gesture(self, timeout: float = 1.0) -> int:
         """Return the last detected IMU gesture ID (see Gesture enum).
 
-        0=none, 1=shake, 2=freefall, 3=tapped, 4=double_tapped.
+        -1=none, 0=tapped, 1=double_tapped, 2=collision, 3=shake, 4=freefall.
         """
         raw = self.eval_python("hub.motion_sensor.get_gesture()", timeout)
         try:
             return int(raw)
         except (ValueError, TypeError):
-            return 0
+            return -1
 
     def was_gesture(self, gesture: int, timeout: float = 1.0) -> bool:
         """Return True if the given gesture occurred since last call (clears flag)."""

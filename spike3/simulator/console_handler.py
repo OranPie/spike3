@@ -246,8 +246,8 @@ class ConsoleHandler:
         if "hub.battery.capacity_left()" in code:
             return str(self.hub.battery_level)
 
-        # ── hub.battery.charger_connected() ────────────────────────
-        if "hub.battery.charger_connected()" in code:
+        # ── hub.battery.charger_connected() / battery.charger_detect() ──
+        if "hub.battery.charger_connected()" in code or "battery.charger_detect()" in code:
             return "False"
 
         # ── hub.motion_sensor.tilt_angles() ───────────────────────
@@ -264,15 +264,24 @@ class ConsoleHandler:
         if "hub.motion_sensor.gyroscope()" in code:
             return "(0, 0, 0)"
 
-        # ── motor.get_position(port.X) ─────────────────────────────
-        m = re.match(r"motor\.get_position\(([^)]+)\)", code)
+        # ── motor.get_position / motor.relative_position(port.X) ────
+        m = re.match(r"motor\.(?:get_position|relative_position)\(([^)]+)\)", code)
         if m:
             port_idx = _port(m.group(1))
             motor = self.hub.get_motor(port_idx)
             return str(motor.position if motor else 0)
 
-        # ── motor.get_speed(port.X) ────────────────────────────────
-        m = re.match(r"motor\.get_speed\(([^)]+)\)", code)
+        # ── motor.absolute_position(port.X) ──────────────────────────
+        m = re.match(r"motor\.absolute_position\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            motor = self.hub.get_motor(port_idx)
+            pos = motor.position if motor else 0
+            # Wrap to -180..179
+            return str(((pos + 180) % 360) - 180)
+
+        # ── motor.get_speed / motor.velocity(port.X) ─────────────────
+        m = re.match(r"motor\.(?:get_speed|velocity)\(([^)]+)\)", code)
         if m:
             port_idx = _port(m.group(1))
             motor = self.hub.get_motor(port_idx)
@@ -318,6 +327,16 @@ class ConsoleHandler:
             if isinstance(dev, ColorSensor):
                 return str(getattr(dev, f"raw_{channel}", 0))
             return "0"
+
+        # ── color_sensor.rgbi(port.X) [JS-verified name] ──────────
+        m = re.match(r"color_sensor\.rgbi\(([^)]+)\)", code)
+        if m:
+            port_idx = _port(m.group(1))
+            dev = self.hub.get_device(port_idx)
+            from .devices import ColorSensor
+            if isinstance(dev, ColorSensor):
+                return f"({dev.raw_red}, {dev.raw_green}, {dev.raw_blue}, 0)"
+            return "(0, 0, 0, 0)"
 
         # ── force_sensor.force(port.X) ─────────────────────────────
         m = re.match(r"force_sensor\.force\(([^)]+)\)", code)
@@ -378,8 +397,8 @@ class ConsoleHandler:
             self.hub.button_right_was_pressed = False
             return "True" if v else "False"
 
-        # ── hub.motion_sensor.get_gesture() / was_gesture(n) ───────
-        if code == "hub.motion_sensor.get_gesture()":
+        # ── hub.motion_sensor.get_gesture() / gesture() / was_gesture(n) ───
+        if code in ("hub.motion_sensor.get_gesture()", "hub.motion_sensor.gesture()"):
             return str(self.hub.gesture)
         m = re.match(r"hub\.motion_sensor\.was_gesture\((\d+)\)", code)
         if m:

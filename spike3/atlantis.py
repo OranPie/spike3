@@ -120,7 +120,8 @@ class SetHubNameRequest:
     name: str = ""
 
     def to_bytes(self) -> bytes:
-        return _u8(self.msg_id) + _str_nul(self.name)
+        # JS caps hub name at 29 bytes (line 2389: .slice(0, 29))
+        return _u8(self.msg_id) + self.name.encode("utf-8")[:29] + b"\x00"
 
 
 @dataclass

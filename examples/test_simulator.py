@@ -273,11 +273,11 @@ def main():
 
         # Gesture
         g = hub.get_gesture(timeout=2.0)
-        test("get_gesture() = 0 (none)", g == 0)
+        test("get_gesture() = -1 (none)", g == -1)
 
-        hub_state.trigger_gesture(1)  # shake
+        hub_state.trigger_gesture(3)  # shake
         g2 = hub.get_gesture(timeout=2.0)
-        test("get_gesture() = 1 (shake)", g2 == 1)
+        test("get_gesture() = 3 (shake)", g2 == 3)
     except Exception as e:
         test("Button/gesture API", False, str(e))
 
