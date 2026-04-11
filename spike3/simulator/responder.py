@@ -117,8 +117,8 @@ class ProtocolResponder:
                                       Status.ACK if ok else Status.NACK]))
             if ok:
                 # Send ProgramFlowNotification (program started)
-                ts = int(time.time() * 1000) & 0xFFFFFFFF
-                notif = bytes([MsgId.PROGRAM_FLOW_NOTIFICATION]) + struct.pack("<I", ts)
+                # Official: uint8(msg_type) + uint8(action), action=0 for Start
+                notif = bytes([MsgId.PROGRAM_FLOW_NOTIFICATION, 0])  # 0 = Start
                 self.send_response(notif)
         elif action == 1:  # STOP
             self.hub.stop_program()
@@ -127,12 +127,14 @@ class ProtocolResponder:
             self.send_response(bytes([MsgId.PROGRAM_FLOW_RESP, Status.NACK]))
 
     def _handle_start_file_upload(self, payload: bytes):
-        # payload: nul_str(filename) + u8(slot) + u32(crc)
+        # Official: string[32](filename) + u8(slot) + u32(crc) = 37 bytes
         try:
-            nul_idx = payload.index(0)
-            filename = payload[:nul_idx].decode("utf-8", errors="replace")
-            slot = payload[nul_idx + 1]
-            file_crc = struct.unpack_from("<I", payload, nul_idx + 2)[0]
+            # Fixed 32-byte filename field (null-terminated, padded)
+            filename_raw = payload[:32]
+            nul_idx = filename_raw.index(0) if 0 in filename_raw else 32
+            filename = filename_raw[:nul_idx].decode("utf-8", errors="replace")
+            slot = payload[32]
+            file_crc = struct.unpack_from("<I", payload, 33)[0]
             ok = self.hub.storage.begin_upload(filename, slot, file_crc)
             logger.info(f"Upload started: {filename} → slot {slot} (crc=0x{file_crc:08X})")
             self.send_response(bytes([MsgId.START_FILE_UPLOAD_RESP,
@@ -142,11 +144,13 @@ class ProtocolResponder:
             self.send_response(bytes([MsgId.START_FILE_UPLOAD_RESP, Status.NACK]))
 
     def _handle_transfer_chunk(self, payload: bytes):
-        if len(payload) < 4:
+        # Official: u32(running_crc) + u16(chunk_size) + u8[chunk_size](data) = 6 + chunk_size
+        if len(payload) < 6:
             self.send_response(bytes([MsgId.TRANSFER_CHUNK_RESP, Status.NACK]))
             return
         running_crc = struct.unpack_from("<I", payload, 0)[0]
-        chunk_data = payload[4:]
+        chunk_size = struct.unpack_from("<H", payload, 4)[0]
+        chunk_data = payload[6:6 + chunk_size]
         if chunk_data:
             ok = self.hub.storage.append_chunk(running_crc, chunk_data)
         else:

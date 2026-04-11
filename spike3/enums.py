@@ -199,6 +199,37 @@ class Gesture(IntEnum):
     FREEFALL = 4
 
 
+# ── Motor control enums (from official LEGO docs) ──────────────────
+
+class MotorEndState(IntEnum):
+    """What the motor does after a timed/degree move completes."""
+    COAST = 0
+    BRAKE = 1
+    HOLD = 2
+    CONTINUE = 3
+    SMART_COAST = 4
+    SMART_BRAKE = 5
+    DEFAULT = 0xFF
+
+
+class MotorDirection(IntEnum):
+    """Direction for go-to-position commands."""
+    CW = 0           # Clockwise
+    CCW = 1          # Counter-clockwise
+    SHORTEST = 2     # Shortest path
+    LONGEST = 3      # Longest path
+
+
+class HubFace(IntEnum):
+    """Hub physical face orientation (from official LEGO docs)."""
+    TOP = 0
+    FRONT = 1
+    RIGHT = 2
+    BOTTOM = 3
+    BACK = 4
+    LEFT = 5
+
+
 # ── MicroPython JSON-RPC notification IDs ───────────────────────────
 
 class MPNotification(IntEnum):

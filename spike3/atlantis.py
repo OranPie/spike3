@@ -41,6 +41,11 @@ def _i32(v: int) -> bytes:
 def _str_nul(s: str) -> bytes:
     return s.encode("utf-8") + b"\x00"
 
+def _str_fixed(s: str, size: int) -> bytes:
+    """Null-terminated string padded to exactly *size* bytes."""
+    encoded = s.encode("utf-8")[:size - 1] + b"\x00"
+    return encoded.ljust(size, b"\x00")
+
 
 # ── Message dataclasses ────────────────────────────────────────────
 
@@ -101,7 +106,7 @@ class ProgramFlowResponse:
 @dataclass
 class ProgramFlowNotification:
     msg_id: int = MsgId.PROGRAM_FLOW_NOTIFICATION
-    timestamp: int = 0
+    action: int = ProgramAction.STOP  # uint8: 0=Start, 1=Stop (confirmed by official LEGO docs)
 
 
 @dataclass
@@ -120,8 +125,8 @@ class SetHubNameRequest:
     name: str = ""
 
     def to_bytes(self) -> bytes:
-        # JS caps hub name at 29 bytes (line 2389: .slice(0, 29))
-        return _u8(self.msg_id) + self.name.encode("utf-8")[:29] + b"\x00"
+        # Official: string[30] — null-terminated, fixed 30 bytes
+        return _u8(self.msg_id) + _str_fixed(self.name, 30)
 
 
 @dataclass
@@ -155,7 +160,8 @@ class DeviceUuidRequest:
 @dataclass
 class DeviceUuidResponse:
     msg_id: int = MsgId.DEVICE_UUID_RESP
-    uuid: str = ""
+    uuid: str = ""       # formatted UUID string "XXXXXXXX-XXXX-..."
+    raw_uuid: bytes = b""  # raw 16-byte UUID
 
 
 @dataclass
@@ -168,7 +174,7 @@ class StartFileUploadRequest:
     def to_bytes(self) -> bytes:
         return (
             _u8(self.msg_id)
-            + _str_nul(self.filename)
+            + _str_fixed(self.filename, 32)
             + _u8(self.slot)
             + _u32(self.file_crc)
         )
@@ -187,7 +193,12 @@ class TransferChunkRequest:
     chunk_data: bytes = b""
 
     def to_bytes(self) -> bytes:
-        return _u8(self.msg_id) + _u32(self.running_crc) + self.chunk_data
+        return (
+            _u8(self.msg_id)
+            + _u32(self.running_crc)
+            + _u16(len(self.chunk_data))
+            + self.chunk_data
+        )
 
 
 @dataclass
@@ -525,8 +536,9 @@ def decode_message(data: bytes):
         return ProgramFlowResponse(status=status)
 
     elif msg_id == MsgId.PROGRAM_FLOW_NOTIFICATION:
-        ts = struct.unpack_from("<I", payload, 0)[0] if len(payload) >= 4 else 0
-        return ProgramFlowNotification(timestamp=ts)
+        # Official LEGO docs: uint8(msg_type) + uint8(ProgramAction)
+        action = payload[0] if payload else ProgramAction.STOP
+        return ProgramFlowNotification(action=action)
 
     elif msg_id == MsgId.CONSOLE_NOTIFICATION:
         text = payload.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
@@ -540,8 +552,15 @@ def decode_message(data: bytes):
         return SetHubNameResponse(status=payload[0] if payload else Status.ACK)
 
     elif msg_id == MsgId.DEVICE_UUID_RESP:
-        uuid_str, _ = _read_nul_str(payload + b"\x00", 0)
-        return DeviceUuidResponse(uuid=uuid_str)
+        # Official LEGO docs: uint8(msg_type) + uint8[16] (raw UUID bytes)
+        raw_uuid = payload[:16] if len(payload) >= 16 else payload
+        # Format as standard UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+        hex_str = raw_uuid.hex()
+        if len(hex_str) == 32:
+            uuid_str = f"{hex_str[:8]}-{hex_str[8:12]}-{hex_str[12:16]}-{hex_str[16:20]}-{hex_str[20:]}"
+        else:
+            uuid_str = hex_str
+        return DeviceUuidResponse(uuid=uuid_str.upper(), raw_uuid=raw_uuid)
 
     elif msg_id == MsgId.START_FILE_UPLOAD_RESP:
         return StartFileUploadResponse(status=payload[0] if payload else Status.ACK)

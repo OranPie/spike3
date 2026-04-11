@@ -150,16 +150,30 @@ class UsbTransport(Transport):
     def _reader_loop(self):
         """Background thread mimicking .NET RunReceiveLoopAsync."""
         logger.debug("Reader thread started")
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 10
         while self._running and self.is_open:
             try:
                 data = self._serial.read(4096)
                 if data:
                     logger.debug(f"RX ({len(data)}): {data.hex(' ')}")
+                    consecutive_errors = 0  # reset on successful read
                     if self._on_data:
                         self._on_data(data)
+            except (OSError, IOError) as e:
+                if not self._running:
+                    break
+                consecutive_errors += 1
+                logger.warning(f"Serial read error ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}")
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    logger.error("Too many consecutive serial errors, exiting reader loop")
+                    break
+                # Brief pause before retry to avoid busy-loop on persistent errors
+                import time
+                time.sleep(0.1)
             except Exception as e:
                 if self._running:
-                    logger.error(f"Serial port error received: {e}")
+                    logger.error(f"Unexpected reader error: {e}")
                 break
         logger.debug("Falling out of receive loop")
 

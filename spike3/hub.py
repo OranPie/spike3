@@ -820,7 +820,7 @@ class Hub:
             on_progress: Optional ``callback(bytes_sent, total_bytes)``.
             timeout: Per-chunk transfer timeout.
         """
-        filename = f"scratch_{slot}"
+        filename = "program.py"
         data = code.encode("utf-8")
         self.upload_program(filename, data, slot=slot,
                             on_progress=on_progress, timeout=timeout)
@@ -1088,31 +1088,44 @@ class Hub:
                        timeout: float = DEFAULT_TIMEOUT):
         """Upload a program file to the hub.
 
+        Follows the official LEGO upload flow:
+        1. ClearSlot → remove old program
+        2. StartFileUpload → initiate transfer with file CRC
+        3. TransferChunk × N → send data chunks with running CRC
+        4. (Optionally call start_program after)
+
         Args:
-            filename: Destination filename on hub.
+            filename: Destination filename on hub (e.g. "program.py").
             data: Program file bytes.
             slot: Target program slot (0-19).
             on_progress: Optional callback(bytes_sent, total_bytes).
             timeout: Timeout for each chunk transfer.
         """
-        import zlib
-        file_crc = zlib.crc32(data) & 0xFFFFFFFF
+        from .crc import crc32 as crc32_aligned
 
-        # 1. Start file upload
+        file_crc_val = crc32_aligned(data)
+
+        # 1. Clear slot first (official flow)
+        self._send_atlantis(
+            atlantis.ClearSlotRequest(slot=slot),
+            timeout=timeout,
+        )
+
+        # 2. Start file upload
         self._send_atlantis(
             atlantis.StartFileUploadRequest(
-                filename=filename, slot=slot, file_crc=file_crc
+                filename=filename, slot=slot, file_crc=file_crc_val
             ),
             timeout=timeout,
         )
 
-        # 2. Transfer chunks
+        # 3. Transfer chunks with 4-byte aligned running CRC
         chunk_size = self._max_chunk_size
         offset = 0
         running_crc = 0
         while offset < len(data):
             chunk = data[offset:offset + chunk_size]
-            running_crc = zlib.crc32(chunk, running_crc) & 0xFFFFFFFF
+            running_crc = crc32_aligned(chunk, running_crc)
             self._send_atlantis(
                 atlantis.TransferChunkRequest(
                     running_crc=running_crc, chunk_data=chunk
